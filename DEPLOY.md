@@ -1,216 +1,215 @@
-# Deploy Don Juan Agent v2 — Hostinger VPS
+# Deploy Don Juan Agent v2 to Hostinger VPS
 
-**Target URL:** `https://sprintai.cloud/dj_project`
-
----
-
-## สิ่งที่ต้องมีบน Server
-
-- Ubuntu 22.04+ (Hostinger VPS)
-- Docker + Docker Compose
-- Nginx (reverse proxy)
-- Domain `sprintai.cloud` ชี้มาที่ VPS แล้ว + SSL (Let's Encrypt)
+## Prerequisites
+- VPS มี Docker + Docker Compose + Git + Nginx ติดตั้งแล้ว
+- Domain `sprintai.cloud` ชี้มาที่ IP ของ VPS แล้ว
+- มี SSH access เข้า VPS
 
 ---
 
-## Step 1: SSH เข้า Server
+## Step 1 — SSH เข้า VPS
 
 ```bash
-ssh root@sprintai.cloud
+ssh root@<your-vps-ip>
 ```
 
-## Step 2: ติดตั้ง Docker (ถ้ายังไม่มี)
+---
+
+## Step 2 — Clone repo
 
 ```bash
-curl -fsSL https://get.docker.com | sh
-apt install -y docker-compose-plugin
+cd /opt
+git clone -b donjuan_v2 https://github.com/Paopasatiht/Donjuan-x-Microsoft-Agent-Framework.git dj_project
+cd dj_project
 ```
 
-## Step 3: Upload โปรเจค
+---
 
-จากเครื่อง Mac:
+## Step 3 — สร้าง .env
 
 ```bash
-# สร้าง folder บน server
-ssh root@sprintai.cloud "mkdir -p /opt/dj_project"
-
-# rsync ขึ้นไป (ไม่รวม .git, __pycache__, .env)
-rsync -avz --exclude='.git' --exclude='__pycache__' --exclude='.env' \
-  /Volumes/INVADER_DB/Claude_Space/SPRINT/Donjuan/Donjuan-x-Microsoft-Agent-Framework/ \
-  root@sprintai.cloud:/opt/dj_project/
+cp .env.example .env
+nano .env
 ```
 
-## Step 4: สร้าง .env บน Server
+ใส่ค่าจริงทุกบรรทัด:
 
-```bash
-ssh root@sprintai.cloud
-cd /opt/dj_project
-
-cat > .env << 'EOF'
-# OpenAI
-OPENAI_API_KEY=sk-proj-ใส่-key-จริง-ตรงนี้
+```env
+OPENAI_API_KEY=sk-proj-ใส่-key-จริงตรงนี้
 OPENAI_MODEL=gpt-4o-mini
 
-# Redis
 REDIS_URL=redis://redis:6379
 
-# Cost control
 MONTHLY_BUDGET_USD=50
 DAILY_QUOTA_PER_USER=20
 MAX_RESPONSE_TOKENS=600
 
-# Admin
 ADMIN_API_KEY=paopow
 
-# Deployment — ต้องตรงกับ path ที่ Nginx proxy_pass
 ROOT_PATH=/dj_project
-
-# OpenTelemetry (optional)
-OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-OTEL_SERVICE_NAME=dj-agent-v2
-EOF
 ```
 
-> **สำคัญ:** `REDIS_URL=redis://redis:6379` ใช้ชื่อ service ใน docker-compose (ไม่ใช่ localhost)
+> **หมายเหตุ:** `REDIS_URL` ต้องเป็น `redis://redis:6379` (ชื่อ service ใน docker-compose) ไม่ใช่ localhost
 
-## Step 5: Build & Run
+บันทึก: `Ctrl+O` → Enter → `Ctrl+X`
+
+---
+
+## Step 4 — Build และ Start container
 
 ```bash
-cd /opt/dj_project
-docker compose up -d --build
+docker compose build
+docker compose up -d
 ```
 
-ตรวจสอบ:
+ตรวจว่า container ขึ้นแล้ว:
+
 ```bash
-# ดู logs
+docker compose ps
+```
+
+ต้องเห็น `Status: Up` ตรง service `app` และ `redis`
+
+ดู log:
+
+```bash
 docker compose logs -f app
-
-# ทดสอบ health (จากใน server)
-curl http://localhost:8080/health
-# → {"status":"ok","model":"gpt-4o-mini"}
 ```
 
-## Step 6: ตั้งค่า Nginx Reverse Proxy
+ต้องเห็นบรรทัดนี้แสดงว่า OK:
 
-เพิ่ม config ใน Nginx (อาจอยู่ที่ `/etc/nginx/sites-available/sprintai.cloud` หรือ `/etc/nginx/conf.d/`):
+```
+INFO: DJ Agent v2 ready!
+INFO: Application startup complete.
+```
+
+กด `Ctrl+C` เพื่อออกจาก log
+
+ทดสอบตรงๆ จาก server:
+
+```bash
+curl http://localhost:8080/dj_project/health
+# ต้องได้: {"status":"ok","model":"gpt-4o-mini"}
+```
+
+---
+
+## Step 5 — ตั้ง Nginx reverse proxy
+
+เปิดไฟล์ config:
+
+```bash
+nano /etc/nginx/sites-available/sprintai
+```
+
+วางเนื้อหานี้ลงไป:
 
 ```nginx
-# ── Don Juan Agent ──────────────────────────────
-location /dj_project/ {
-    proxy_pass http://127.0.0.1:8080/;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+server {
+    listen 80;
+    server_name sprintai.cloud;
 
-    # WebSocket support (ถ้าต้องใช้ในอนาคต)
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-
-    # Timeout สำหรับ LLM response ที่อาจช้า
-    proxy_read_timeout 120s;
-    proxy_send_timeout 120s;
+    # Don Juan Agent — https://sprintai.cloud/dj_project
+    location /dj_project/ {
+        proxy_pass         http://127.0.0.1:8080/;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
 }
 ```
 
-Test & reload:
+เปิดใช้งาน:
+
 ```bash
-nginx -t && systemctl reload nginx
+ln -s /etc/nginx/sites-available/sprintai /etc/nginx/sites-enabled/
+nginx -t
+systemctl reload nginx
 ```
 
-## Step 7: ทดสอบ
+ทดสอบ:
 
 ```bash
-# Health check
+curl http://sprintai.cloud/dj_project/health
+# ต้องได้: {"status":"ok","model":"gpt-4o-mini"}
+```
+
+---
+
+## Step 6 — ติดตั้ง SSL (Let's Encrypt)
+
+```bash
+certbot --nginx -d sprintai.cloud
+```
+
+เลือก option **2: Redirect** (force HTTPS)
+
+ทดสอบ:
+
+```bash
 curl https://sprintai.cloud/dj_project/health
+# ต้องได้: {"status":"ok","model":"gpt-4o-mini"}
+```
 
-# หน้าเว็บ
-# เปิด browser → https://sprintai.cloud/dj_project
+---
 
-# Admin dashboard
-# เปิด browser → https://sprintai.cloud/dj_project/admin
-# ใส่รหัส: paopow
+## Step 7 — ทดสอบ End-to-End
 
-# ทดสอบ chat API
+เปิด browser ไปที่ URL ต่อไปนี้:
+
+| URL | ผลที่ต้องเห็น |
+|-----|--------------|
+| `https://sprintai.cloud/dj_project` | Landing page — aurora animations, wordmark Don Juan |
+| `https://sprintai.cloud/dj_project/admin` | หน้าใส่รหัสผ่าน (พิมพ์ `paopow`) |
+
+ทดสอบ chat API:
+
+```bash
 curl -X POST https://sprintai.cloud/dj_project/chat \
   -H "Content-Type: application/json" \
-  -d '{"user_id":"test_user","message":"สวัสดีครับ"}'
+  -d '{"user_id":"test01","message":"สวัสดีครับ"}'
 ```
 
----
+ต้องได้ response จาก DJ Agent กลับมา
 
-## โครงสร้าง URL
-
-| URL | หน้าที่ |
-|-----|--------|
-| `sprintai.cloud/dj_project` | Landing page (aurora, animations) |
-| `sprintai.cloud/dj_project/admin` | Admin login → dashboard |
-| `sprintai.cloud/dj_project/health` | Health check API |
-| `sprintai.cloud/dj_project/chat` | Chat API (POST) |
-| `sprintai.cloud/dj_project/usage/{user_id}` | Quota check API |
-| `sprintai.cloud/dj_project/admin/stats` | Admin stats API |
-| `sprintai.cloud/dj_project/admin/users` | Admin user list API |
-
----
-
-## การอัปเดต
+ดู log ขณะใช้งาน:
 
 ```bash
-# จากเครื่อง Mac — sync ไฟล์ใหม่ขึ้นไป
-rsync -avz --exclude='.git' --exclude='__pycache__' --exclude='.env' \
-  /Volumes/INVADER_DB/Claude_Space/SPRINT/Donjuan/Donjuan-x-Microsoft-Agent-Framework/ \
-  root@sprintai.cloud:/opt/dj_project/
-
-# บน server — rebuild
-ssh root@sprintai.cloud "cd /opt/dj_project && docker compose up -d --build"
-```
-
----
-
-## การดูแล
-
-```bash
-# ดู logs แบบ real-time
 docker compose logs -f app
+```
 
-# restart
-docker compose restart app
+ต้องเห็น flow ตามนี้:
 
-# ดู resource usage
-docker stats
-
-# ดู Redis data
-docker compose exec redis redis-cli
-> KEYS dj:*
-> GET dj:cost:monthly:2026-04
-
-# Jaeger traces (ถ้าเปิดใช้)
-# http://sprintai.cloud:16686 (ควร bind localhost เท่านั้น)
+```
+INFO: [query_logger] user=test01 query=สวัสดีครับ
+INFO: POST /chat HTTP/1.1 200 OK
 ```
 
 ---
 
-## Cost Monitor
+## Future Deploy (เมื่อมี code update)
 
-- Budget: **$50/เดือน**
-- Model: gpt-4o-mini (~$0.0007/request)
-- Auto-scaling:
-  - spend < $30 → 20 คำถาม/วัน
-  - spend > $30 → 15/วัน
-  - spend > $40 → 10/วัน  
-  - spend > $48 → 5/วัน
-  - spend >= $50 → ปิดบริการอัตโนมัติ
-
-ดูได้ที่ `https://sprintai.cloud/dj_project/admin` (รหัส: paopow)
+```bash
+cd /opt/dj_project
+git pull
+docker compose build
+docker compose up -d
+docker compose logs -f app
+```
 
 ---
 
-## Security Checklist
+## Troubleshooting
 
-- [x] Admin API ต้องใช้ `X-Admin-Key` header
-- [x] Admin dashboard ต้องใส่รหัส
-- [x] `.env` ไม่ได้ commit ลง git
-- [x] CORS allow all (ปลอดภัยเพราะ API ไม่มี cookie auth)
-- [ ] เปลี่ยน `ADMIN_API_KEY` จาก `paopow` เป็นอะไรที่แข็งแรงกว่า (ถ้าต้องการ)
-- [ ] Jaeger UI ควร bind localhost เท่านั้น (อย่า expose port 16686)
+| อาการ | วิธีแก้ |
+|-------|--------|
+| `curl localhost:8080/dj_project/health` ไม่ตอบ | เช็ค `docker compose ps` — app ต้อง Up |
+| หน้าเว็บขึ้นแต่ chat ไม่ตอบ | เช็ค `OPENAI_API_KEY` ใน `.env` |
+| Admin login ไม่ผ่าน | ตรวจ `ADMIN_API_KEY` ใน `.env` ตรงกับที่พิมพ์หรือเปล่า |
+| `https://` ไม่ทำงาน | รัน `certbot --nginx -d sprintai.cloud` อีกครั้ง |
+| Nginx 502 Bad Gateway | app ยังไม่ขึ้น — รอ 30 วิ แล้วลอง reload อีกครั้ง |
+| Redis ไม่ connect | `REDIS_URL` ต้องเป็น `redis://redis:6379` ไม่ใช่ localhost |
+| ยังไม่มี quota (เหลือ 0 ทันที) | เช็ค Redis เชื่อมต่อได้จริง: `docker compose exec redis redis-cli ping` |
