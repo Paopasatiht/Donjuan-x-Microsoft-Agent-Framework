@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="th" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Don Juan Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700;1,900&family=Prompt:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+:root {
+  --bg: oklch(0.16 0.008 70);
+  --bg-raised: oklch(0.195 0.009 70);
+  --bg-inset: oklch(0.135 0.008 70);
+  --hairline: oklch(0.28 0.01 70);
+  --hairline-strong: oklch(0.38 0.012 70);
+  --fg: oklch(0.96 0.008 85);
+  --fg-muted: oklch(0.72 0.012 80);
+  --fg-quiet: oklch(0.55 0.015 75);
+  --accent: oklch(0.74 0.13 55);
+  --accent-quiet: oklch(0.55 0.09 55);
+  --accent-ink: oklch(0.2 0.04 55);
+  --danger: oklch(0.65 0.16 25);
+  --ok: oklch(0.72 0.1 150);
+  --serif: 'Prompt', 'Sarabun', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --sans: 'Sarabun', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --display: 'Playfair Display', serif;
+}
+[data-theme="light"] {
+  --bg: oklch(0.97 0.006 85);
+  --bg-raised: oklch(0.995 0.004 85);
+  --bg-inset: oklch(0.93 0.008 80);
+  --hairline: oklch(0.87 0.01 80);
+  --hairline-strong: oklch(0.76 0.012 80);
+  --fg: oklch(0.22 0.01 70);
+  --fg-muted: oklch(0.42 0.012 75);
+  --fg-quiet: oklch(0.58 0.01 75);
+  --accent: oklch(0.55 0.14 50);
+  --accent-quiet: oklch(0.7 0.08 55);
+  --accent-ink: oklch(0.98 0.01 80);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--sans); font-size: 16px; line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+body { min-height: 100vh; }
+::selection { background: var(--accent); color: var(--accent-ink); }
+button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+input { font-family: inherit; color: inherit; background: none; border: none; outline: none; }
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 999px; border: 2px solid var(--bg); }
+
+/* Login */
+.login-page {
+  min-height: 100vh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 20px; padding: 40px;
+}
+.login-page h1 {
+  font-family: var(--display); font-size: 42px; font-weight: 700;
+  font-style: italic; letter-spacing: -0.02em;
+}
+.login-page h1 em { color: var(--accent); }
+.login-sub {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--fg-quiet); margin-bottom: 16px;
+}
+.login-page input {
+  background: var(--bg-raised); border: 1px solid var(--hairline);
+  padding: 14px 20px; font-size: 15px; width: 320px;
+  border-radius: 2px; text-align: center; color: var(--fg);
+  transition: border-color .15s;
+}
+.login-page input:focus { border-color: var(--accent); }
+.login-btn {
+  padding: 12px 32px; border: 1.5px solid var(--accent) !important;
+  color: var(--accent); font-family: var(--mono); font-size: 12px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  transition: all .2s;
+}
+.login-btn:hover { background: var(--accent); color: var(--accent-ink); }
+.login-err { color: var(--danger); font-size: 13px; min-height: 20px; }
+
+/* Admin shell */
+.admin-shell {
+  display: flex; flex-direction: column; min-height: 100vh;
+}
+.admin-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 32px; border-bottom: 1px solid var(--hairline);
+  background: var(--bg); position: sticky; top: 0; z-index: 10;
+}
+.admin-topbar-left { display: flex; align-items: baseline; gap: 12px; }
+.admin-topbar-left .brand {
+  font-family: var(--display); font-size: 18px; font-weight: 700;
+  font-style: italic; letter-spacing: -0.01em;
+}
+.admin-topbar-left .brand em { color: var(--accent); }
+.admin-topbar-left .tag {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--fg-quiet);
+  padding: 3px 8px; border: 1px solid var(--hairline); border-radius: 2px;
+}
+.admin-topbar-right { display: flex; align-items: center; gap: 10px; }
+.admin-topbar-right .iconbtn {
+  width: 32px; height: 32px; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--fg-muted); transition: background .12s;
+}
+.admin-topbar-right .iconbtn:hover { background: var(--bg-raised); color: var(--fg); }
+.logout-btn {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--danger); transition: opacity .12s;
+}
+.logout-btn:hover { opacity: 0.7; }
+
+/* Dashboard */
+.admin { padding: 40px 48px 60px; max-width: 1240px; margin: 0 auto; }
+.admin h2 {
+  font-family: var(--serif); font-weight: 700; font-size: 36px;
+  line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 6px;
+}
+.admin-sub {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--fg-quiet); margin-bottom: 40px;
+}
+.kpi-row {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 1px; background: var(--hairline);
+  border: 1px solid var(--hairline); margin-bottom: 48px;
+}
+.kpi {
+  background: var(--bg); padding: 22px 24px 24px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.kpi-label {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--fg-quiet);
+}
+.kpi-value {
+  font-family: var(--serif); font-weight: 600; font-size: 36px;
+  line-height: 1.1; color: var(--fg); letter-spacing: -0.02em;
+}
+.kpi-value .unit {
+  font-family: var(--mono); font-size: 13px; color: var(--fg-quiet);
+  margin-left: 6px; letter-spacing: 0.06em;
+}
+.kpi-delta { font-family: var(--mono); font-size: 11px; color: var(--fg-quiet); margin-top: 2px; }
+.kpi-delta.up { color: var(--ok); }
+.kpi-delta.warn { color: var(--accent); }
+
+.panel {
+  border: 1px solid var(--hairline); background: var(--bg); margin-bottom: 32px;
+}
+.panel-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 18px 22px; border-bottom: 1px solid var(--hairline);
+}
+.panel-title {
+  font-family: var(--serif); font-weight: 600; font-size: 19px;
+  color: var(--fg); letter-spacing: -0.015em;
+}
+.panel-meta {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--fg-quiet);
+}
+.panel-body { padding: 22px; }
+
+/* Budget ruler */
+.ruler { position: relative; padding: 32px 0 40px; }
+.ruler-track { height: 1px; background: var(--hairline-strong); position: relative; }
+.ruler-fill {
+  position: absolute; top: -3px; left: 0; height: 7px;
+  background: var(--accent); transition: width .6s cubic-bezier(.2,.7,.2,1);
+}
+.ruler-ticks { position: absolute; inset: 0; display: flex; justify-content: space-between; }
+.ruler-tick { width: 1px; height: 9px; background: var(--hairline-strong); position: relative; top: -4px; }
+.ruler-tick.major { height: 14px; top: -6px; background: var(--fg-muted); }
+.ruler-labels {
+  position: relative; margin-top: 14px; display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--fg-quiet);
+}
+.ruler-cursor {
+  position: absolute; top: -28px; transform: translateX(-50%);
+  font-family: var(--serif); font-weight: 600; font-size: 16px;
+  color: var(--accent); white-space: nowrap;
+}
+.ruler-cursor::after {
+  content: ''; position: absolute; left: 50%; transform: translateX(-50%);
+  top: 100%; width: 1px; height: 12px; background: var(--accent); margin-top: 2px;
+}
+.ruler-annot {
+  position: absolute; bottom: -2px; transform: translateX(-50%);
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+  color: var(--fg-quiet); text-transform: uppercase; white-space: nowrap; padding-top: 16px;
+}
+.ruler-annot::before {
+  content: ''; position: absolute; left: 50%; top: 0;
+  width: 1px; height: 10px; background: var(--hairline-strong);
+}
+
+/* Table */
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th {
+  text-align: left; font-family: var(--mono); font-weight: 500; font-size: 10px;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-quiet);
+  padding: 10px 14px; border-bottom: 1px solid var(--hairline);
+}
+.table td {
+  padding: 12px 14px; border-bottom: 1px solid var(--hairline);
+  color: var(--fg); vertical-align: middle;
+}
+.table tr:last-child td { border-bottom: 0; }
+.table tr:hover td { background: var(--bg-raised); }
+.table td.mono { font-family: var(--mono); font-size: 12px; color: var(--fg-muted); }
+.table td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.table .bar { height: 2px; background: var(--accent); display: block; margin-top: 4px; }
+.table .pill {
+  display: inline-block; padding: 2px 8px; font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  border: 1px solid var(--hairline); color: var(--fg-muted); border-radius: 999px;
+}
+.table .pill.ok { color: var(--ok); border-color: color-mix(in oklch, var(--ok) 35%, var(--hairline)); }
+.table .pill.warn { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 35%, var(--hairline)); }
+
+/* Spark bars */
+.sparkrow {
+  display: grid; grid-template-columns: 90px 1fr 60px;
+  gap: 12px; align-items: center; padding: 6px 0; font-size: 12px;
+}
+.spark-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--fg-quiet); text-transform: uppercase; }
+.spark { display: flex; gap: 2px; align-items: flex-end; height: 36px; }
+.spark-bar { flex: 1; background: var(--hairline-strong); min-height: 2px; }
+.spark-bar.hi { background: var(--accent); }
+.spark-val { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); text-align: right; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 720px) {
+  .admin { padding: 24px 16px; }
+  .kpi-row { grid-template-columns: 1fr 1fr; }
+  .admin-topbar { padding: 12px 16px; }
+}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// Auto-detect base path: strip /admin from current URL
+const API = window.location.pathname.replace(/\/admin\/?$/, '');
+let adminKey = '';
+let authed = false;
+let stats = null;
+let users = null;
+let spendHistory = null;
+let err = '';
+let theme = localStorage.getItem('dj_theme') || 'dark';
+document.documentElement.dataset.theme = theme;
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function setTheme(t) { theme = t; document.documentElement.dataset.theme = t; localStorage.setItem('dj_theme', t); render(); }
+
+async function doLogin() {
+  const inp = document.getElementById('pwInput');
+  if (!inp) return;
+  adminKey = inp.value;
+  err = '';
+  try {
+    const r = await fetch(API + '/admin/stats', { headers: { 'X-Admin-Key': adminKey } });
+    if (r.ok) {
+      authed = true;
+      stats = await r.json();
+      await refreshData();
+    } else {
+      err = 'รหัสผ่านไม่ถูกต้อง';
+    }
+  } catch(e) { err = 'เชื่อมต่อ server ไม่ได้'; }
+  render();
+}
+
+async function refreshData() {
+  try {
+    const [ur, sr] = await Promise.all([
+      fetch(API + '/admin/users', { headers: { 'X-Admin-Key': adminKey } }),
+      fetch(API + '/admin/spend-history', { headers: { 'X-Admin-Key': adminKey } }),
+    ]);
+    if (ur.ok) users = await ur.json();
+    if (sr.ok) spendHistory = await sr.json();
+  } catch(e) {}
+}
+
+async function refresh() {
+  try {
+    const r = await fetch(API + '/admin/stats', { headers: { 'X-Admin-Key': adminKey } });
+    if (r.ok) stats = await r.json();
+    await refreshData();
+  } catch(e) {}
+  render();
+}
+
+function logout() { authed = false; adminKey = ''; stats = null; users = null; err = ''; render(); }
+
+function renderLogin() {
+  return `<div class="login-page">
+    <h1><em>Don</em>Juan</h1>
+    <div class="login-sub">ADMIN OBSERVATORY</div>
+    <input id="pwInput" type="password" placeholder="Enter admin password" onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="login-btn" onclick="doLogin()">AUTHENTICATE</button>
+    <div class="login-err">${err ? esc(err) : ''}</div>
+  </div>`;
+}
+
+function renderDashboard() {
+  const s = stats || {};
+  const uList = (users?.users || []);
+  const budget = s.monthly_budget_usd || 50;
+  const spend = s.monthly_spend_usd || 0;
+  const spendPct = Math.min((spend / budget * 100), 100).toFixed(1);
+  const history = spendHistory?.spend_history || [];
+
+  // Determine rate limit status
+  let rlStatus = 'NORMAL';
+  let rlClass = '';
+  const rl = s.current_daily_limit || 20;
+  if (rl === 0) { rlStatus = 'SUSPENDED'; rlClass = 'warn'; }
+  else if (rl <= 5) { rlStatus = 'CRITICAL'; rlClass = 'warn'; }
+  else if (rl <= 10) { rlStatus = 'REDUCED'; rlClass = 'warn'; }
+  else if (rl <= 15) { rlStatus = 'SCALING'; rlClass = ''; }
+
+  // Spark chart from spend history
+  const maxCost = Math.max(...history.map(d => d.cost_usd), 0.001);
+  const sparkBars = history.length > 0
+    ? history.map(d => {
+        const h = Math.max((d.cost_usd / maxCost * 100), 4);
+        const isHi = d.cost_usd === maxCost;
+        return `<div class="spark-bar${isHi?' hi':''}" style="height:${h}%" title="${d.date}: $${d.cost_usd}"></div>`;
+      }).join('')
+    : '<div style="color:var(--fg-quiet);font-size:12px">No data yet</div>';
+
+  return `<div class="admin-shell">
+    <div class="admin-topbar">
+      <div class="admin-topbar-left">
+        <span class="brand"><em>Don</em>Juan</span>
+        <span class="tag">ADMIN</span>
+      </div>
+      <div class="admin-topbar-right">
+        <button class="iconbtn" onclick="refresh()" title="Refresh">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+        </button>
+        <button class="iconbtn" onclick="setTheme(theme==='dark'?'light':'dark')" title="Toggle theme">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button class="logout-btn" onclick="logout()">LOGOUT</button>
+      </div>
+    </div>
+
+    <div class="admin">
+      <div class="admin-sub">OBSERVATORY &middot; V2</div>
+      <h2>&#3604;&#3629;&#3609;&#3630;&#3623;&#3609;&#3585;&#3635;&#3621;&#3633;&#3591;&#3607;&#3635;&#3591;&#3634;&#3609;</h2>
+
+      <div style="margin-top:40px">
+        <div class="kpi-row">
+          <div class="kpi">
+            <div class="kpi-label">Queries today</div>
+            <div class="kpi-value">${s.total_queries_today||0}</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Unique users</div>
+            <div class="kpi-value">${s.unique_users_today||0}</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Monthly spend</div>
+            <div class="kpi-value">$${spend.toFixed(2)}<span class="unit">/ $${budget}</span></div>
+            <div class="kpi-delta ${spend > budget*0.8 ? 'warn' : ''}">${spendPct}% of budget</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Rate limit</div>
+            <div class="kpi-value">${rl}<span class="unit">/ day</span></div>
+            <div class="kpi-delta ${rlClass}">${rlStatus}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Monthly budget &middot; $${budget} hard cap</div>
+          <div class="panel-meta">AUTO-SCALING RATE LIMIT</div>
+        </div>
+        <div class="panel-body">
+          <div class="ruler">
+            <div class="ruler-track">
+              <div class="ruler-fill" style="width:${spendPct}%"></div>
+              <div class="ruler-cursor" style="left:${spendPct}%">$${spend.toFixed(2)}</div>
+              <div class="ruler-ticks">
+                ${[0,10,20,30,40,50,60,70,80,90,100].map(p => `<div class="ruler-tick${p%20===0?' major':''}"></div>`).join('')}
+              </div>
+            </div>
+            <div class="ruler-labels">
+              <span>$0</span><span>$10</span><span>$20</span><span>$30</span><span>$40</span><span>$50</span>
+            </div>
+            <div class="ruler-annot" style="left:60%">WARN &middot; 15/day</div>
+            <div class="ruler-annot" style="left:80%">SCALE &middot; 10/day</div>
+            <div class="ruler-annot" style="left:96%">CRITICAL &middot; 5/day</div>
+          </div>
+        </div>
+      </div>
+
+      ${history.length > 0 ? `
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Daily spend</div>
+          <div class="panel-meta">THIS MONTH</div>
+        </div>
+        <div class="panel-body">
+          <div class="sparkrow">
+            <div class="spark-label">COST/DAY</div>
+            <div class="spark">${sparkBars}</div>
+            <div class="spark-val">$${spend.toFixed(2)}</div>
+          </div>
+        </div>
+      </div>` : ''}
+
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Active users today</div>
+          <div class="panel-meta">${uList.length} USERS</div>
+        </div>
+        <div class="panel-body">
+          ${uList.length ? `<table class="table">
+            <thead><tr><th>User ID</th><th>Queries</th><th>Status</th></tr></thead>
+            <tbody>${uList.map(u => {
+              const pct = Math.min((u.queries_today / rl * 100), 100);
+              const status = u.queries_today >= rl ? 'warn' : 'ok';
+              return `<tr>
+                <td class="mono">${esc(u.user_id)}</td>
+                <td class="num">${u.queries_today}<span class="bar" style="width:${pct}%"></span></td>
+                <td><span class="pill ${status}">${status === 'warn' ? 'LIMIT' : 'ACTIVE'}</span></td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>` : '<div style="color:var(--fg-quiet);font-size:14px;padding:20px 0;text-align:center">&#3618;&#3633;&#3591;&#3652;&#3617;&#3656;&#3617;&#3637;&#3612;&#3641;&#3657;&#3651;&#3594;&#3657;&#3623;&#3633;&#3609;&#3609;&#3637;&#3657;</div>'}
+        </div>
+      </div>
+
+    </div>
+  </div>`;
+}
+
+function render() {
+  document.getElementById('root').innerHTML = authed ? renderDashboard() : renderLogin();
+  if (!authed) {
+    const inp = document.getElementById('pwInput');
+    if (inp) inp.focus();
+  }
+}
+
+render();
+</script>
+</body>
+</html>
