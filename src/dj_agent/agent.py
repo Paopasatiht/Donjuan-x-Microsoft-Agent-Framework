@@ -54,6 +54,24 @@ class InMemoryRedis:
         s = self._data.get(key, set())
         return s if isinstance(s, set) else set()
 
+    def lpush(self, key, *values):
+        if key not in self._data:
+            self._data[key] = []
+        for v in reversed(values):
+            self._data[key].insert(0, v)
+        return len(self._data[key])
+
+    def ltrim(self, key, start, end):
+        lst = self._data.get(key, [])
+        self._data[key] = lst[start: end + 1 if end >= 0 else None]
+
+    def lrange(self, key, start, end):
+        lst = self._data.get(key, [])
+        return lst[start: end + 1 if end >= 0 else None]
+
+    def llen(self, key):
+        return len(self._data.get(key, []))
+
     def ping(self):
         return True
 
