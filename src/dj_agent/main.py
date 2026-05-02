@@ -31,21 +31,24 @@ logger = logging.getLogger(__name__)
 # Global state (set in lifespan)
 _agent = None
 _components = None
-_stream_workflow = None
 
 # Suggestions cache: refreshed every hour
 _suggestions_cache: dict = {"items": [], "ts": 0.0}
 _SUGGESTIONS_TTL = 3600
 
+_FALLBACK_SUGGESTIONS = [
+    {"label": "FEAR", "text": "ผมชอบสาวคนนึงแต่ไม่กล้าเข้าไปคุย"},
+    {"label": "FRIENDZONE", "text": "เธอบอกว่าเราเป็นแค่เพื่อนกัน"},
+    {"label": "NICE GUY", "text": "ผมดีกับเธอมากแต่เธอไม่สนใจ"},
+    {"label": "SELF-ESTEEM", "text": "วิธีสร้าง self-esteem ทำยังไง"},
+]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _agent, _components, _stream_workflow
+    global _agent, _components
     logger.info("Starting DJ Agent v2...")
     _agent, _components = build_dj_agent()
-    # Build a single-agent workflow for streaming support
-    from agent_framework import WorkflowBuilder
-    _stream_workflow = WorkflowBuilder(name="dj_stream", start_executor=_agent).build()
     logger.info("DJ Agent v2 ready!")
     yield
     logger.info("Shutting down DJ Agent v2...")
@@ -145,12 +148,12 @@ async def chat_stream(req: ChatRequest):
     rate_limiter._increment_user(req.user_id)
 
     async def event_gen():
-        from agent_framework import AgentResponseUpdate
         try:
             session = _agent.create_session(session_id=req.user_id)
-            async for event in _stream_workflow.run(req.message, session=session, stream=True):
-                if event.type == "output" and isinstance(event.data, AgentResponseUpdate):
-                    yield f"data: {json.dumps({'text': event.data.text})}\n\n"
+            stream = _agent.run(req.message, session=session, stream=True)
+            async for update in stream:
+                if update.text:
+                    yield f"data: {json.dumps({'text': update.text})}\n\n"
         except Exception as e:
             logger.error(f"Stream error: {e}")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -167,37 +170,40 @@ async def chat_stream(req: ChatRequest):
 
 @app.get("/suggestions", response_model=SuggestionsResponse)
 async def get_suggestions():
-    """Return 4 AI-generated Thai dating questions (cached 1 h)."""
+    """Return 4 AI-generated Thai dating questions (cached 1 h, fallback to defaults)."""
     global _suggestions_cache
     now = time.time()
     if now - _suggestions_cache["ts"] < _SUGGESTIONS_TTL and _suggestions_cache["items"]:
         return {"suggestions": _suggestions_cache["items"]}
 
-    oai = AsyncOpenAI(api_key=settings.openai_api_key)
-    result = await oai.chat.completions.create(
-        model=settings.openai_model,
-        messages=[{
-            "role": "user",
-            "content": (
-                "สร้าง 4 คำถามภาษาไทยสั้น ๆ ที่คนจะถาม dating coach ชื่อ Don Juan "
-                "หัวข้อ: ความกลัวเข้าหาคนที่ชอบ, friendzone, ถูกมองข้าม, วิธีสร้าง self-esteem "
-                "ตอบเป็น JSON array เท่านั้น ไม่มี markdown: "
-                '[{"label":"TOPIC_EN_MAX_10CHARS","text":"คำถามภาษาไทยไม่เกิน 20 คำ"}] '
-                "4 items"
-            ),
-        }],
-        max_tokens=400,
-        temperature=1.1,
-    )
-    raw = result.choices[0].message.content.strip()
-    # Strip markdown fences if model adds them
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    items = json.loads(raw.strip())
-    _suggestions_cache = {"items": items, "ts": now}
-    return {"suggestions": items}
+    try:
+        oai = AsyncOpenAI(api_key=settings.openai_api_key)
+        result = await oai.chat.completions.create(
+            model=settings.openai_model,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "สร้าง 4 คำถามภาษาไทยสั้น ๆ ที่คนจะถาม dating coach ชื่อ Don Juan "
+                    "หัวข้อ: ความกลัวเข้าหาคนที่ชอบ, friendzone, ถูกมองข้าม, วิธีสร้าง self-esteem "
+                    "ตอบเป็น JSON array เท่านั้น ไม่มี markdown: "
+                    '[{"label":"TOPIC_EN_MAX_10CHARS","text":"คำถามภาษาไทยไม่เกิน 20 คำ"}] '
+                    "4 items"
+                ),
+            }],
+            max_tokens=400,
+            temperature=1.1,
+        )
+        raw = result.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        items = json.loads(raw.strip())
+        _suggestions_cache = {"items": items, "ts": now}
+        return {"suggestions": items}
+    except Exception as e:
+        logger.warning(f"Suggestions generation failed ({e}), using fallback")
+        return {"suggestions": _FALLBACK_SUGGESTIONS}
 
 
 @app.get("/usage/{user_id}", response_model=UsageResponse)
