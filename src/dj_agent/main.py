@@ -12,7 +12,6 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from openai import AsyncOpenAI
 
 from .agent import build_dj_agent
 from .config import settings
@@ -51,15 +50,53 @@ def _get_or_create_session(session_id: str):
         _active_sessions[session_id] = (sess, now)
     return _active_sessions[session_id][0]
 
-# Suggestions cache: refreshed every hour
-_suggestions_cache: dict = {"items": [], "ts": 0.0}
-_SUGGESTIONS_TTL = 3600
-
-_FALLBACK_SUGGESTIONS = [
-    {"label": "FEAR", "text": "ผมชอบสาวคนนึงแต่ไม่กล้าเข้าไปคุย"},
-    {"label": "FRIENDZONE", "text": "เธอบอกว่าเราเป็นแค่เพื่อนกัน"},
-    {"label": "NICE GUY", "text": "ผมดีกับเธอมากแต่เธอไม่สนใจ"},
-    {"label": "SELF-ESTEEM", "text": "วิธีสร้าง self-esteem ทำยังไง"},
+# Static starter cards — pre-written questions + answers shown instantly on the homepage.
+# Edit these directly to update what users see; no AI call is made for this endpoint.
+_PREFILLED_STARTERS = [
+    {
+        "label": "FEAR",
+        "text": "ผมชอบสาวคนนึงแต่ไม่กล้าเข้าไปคุย",
+        "answer": (
+            "ความกลัวที่แกรู้สึกอยู่ตอนนี้มันไม่ได้มาจากเธอ — มันมาจากการที่แกให้คุณค่าตัวเองต่ำกว่าเธอ\n\n"
+            "ก่อนเดินเข้าไปหา ให้ถามตัวเองว่า: \"ถ้าเธอปฏิเสธ ชีวิตแกจะพังไหม?\" คำตอบคือไม่ "
+            "แกยังมีชีวิต เป้าหมาย และคุณค่าในตัวเองอยู่ครบ\n\n"
+            "ดังนั้นเดินเข้าไปด้วย frame ว่าแกไปคุยกับคน — ไม่ใช่ไปขอความเห็นชอบจากเธอ "
+            "พูดง่าย ๆ สบาย ๆ แค่ \"เฮ้ ขอคุยแป๊บนึงได้ไหม?\" แค่นั้นพอ ส่วนที่เหลือปล่อยให้บทสนทนาพาไปเอง"
+        ),
+    },
+    {
+        "label": "FRIENDZONE",
+        "text": "เธอบอกว่าเราเป็นแค่เพื่อนกัน",
+        "answer": (
+            "Friendzone ไม่ใช่กับดัก — มันคือ feedback ที่บอกว่า attraction ยังไม่เกิด\n\n"
+            "สิ่งที่ต้องทำตอนนี้คือหยุด 'ดีกับเธอ' แบบหวัง ๆ แล้วเริ่มสร้างตัวตนที่มีคุณค่าในแบบของตัวเอง "
+            "มีชีวิตที่น่าสนใจ มีเป้าหมาย มี boundary — คนที่มี self-respect จะไม่ทนนั่งรออยู่ใน friendzone\n\n"
+            "ถ้าแกต้องการมากกว่าเพื่อน ก็พูดตรง ๆ ครั้งเดียว แล้วยอมรับคำตอบ ไม่ว่าจะออกมาแบบไหน "
+            "นั่นคือสิ่งที่ผู้ชายที่มีคุณค่าทำ"
+        ),
+    },
+    {
+        "label": "NICE GUY",
+        "text": "ผมดีกับเธอมากแต่เธอไม่สนใจ",
+        "answer": (
+            "ความ 'ดี' ที่แกให้ไปนั้น — มันมาจากใจจริง หรือเพราะหวังว่าเธอจะรู้สึกอะไรกลับมา?\n\n"
+            "ถ้าคำตอบคืออย่างหลัง นั่นไม่ใช่ความดี นั่นคือการต่อรองที่ซ่อนอยู่ และผู้หญิงรู้สึกได้\n\n"
+            "Attraction ไม่ได้เกิดจากการที่ใครดีกับเธอมากที่สุด มันเกิดจาก confidence, presence, "
+            "และ self-respect หยุดพยายามเป็นคนที่เธออยากได้ แล้วเริ่มเป็นคนที่แกอยากเป็น "
+            "นั่นแหละคือจุดที่ทุกอย่างเปลี่ยน"
+        ),
+    },
+    {
+        "label": "SELF-ESTEEM",
+        "text": "วิธีสร้าง self-esteem ทำยังไง",
+        "answer": (
+            "Self-esteem ไม่ได้สร้างจากคำชมหรือการที่ใครมาชอบแก มันสร้างจากการที่แกทำสิ่งที่ยากแล้วผ่านมันมาได้\n\n"
+            "เริ่มที่นี่: **ทำตามที่พูด** ถ้าแกบอกตัวเองว่าจะตื่น 6 โมง ก็ตื่น 6 โมง "
+            "ถ้าบอกว่าจะออกกำลังกาย ก็ออก การสะสมชัยชนะเล็ก ๆ กับตัวเองทุกวันคือรากฐานของ self-esteem ที่แท้จริง\n\n"
+            "ขั้นต่อมาคือหยุดขอโทษที่มีความต้องการ หยุดลดตัวเองเพื่อให้คนอื่น comfortable "
+            "แกมีสิทธิ์ใช้พื้นที่ในโลกนี้ — เริ่มเชื่ออย่างนั้น"
+        ),
+    },
 ]
 
 
@@ -200,40 +237,8 @@ async def chat_stream(req: ChatRequest):
 
 @app.get("/suggestions", response_model=SuggestionsResponse)
 async def get_suggestions():
-    """Return 4 AI-generated Thai dating questions (cached 1 h, fallback to defaults)."""
-    global _suggestions_cache
-    now = time.time()
-    if now - _suggestions_cache["ts"] < _SUGGESTIONS_TTL and _suggestions_cache["items"]:
-        return {"suggestions": _suggestions_cache["items"]}
-
-    try:
-        oai = AsyncOpenAI(api_key=settings.openai_api_key)
-        result = await oai.chat.completions.create(
-            model=settings.openai_model,
-            messages=[{
-                "role": "user",
-                "content": (
-                    "สร้าง 4 คำถามภาษาไทยสั้น ๆ ที่คนจะถาม dating coach ชื่อ Don Juan "
-                    "หัวข้อ: ความกลัวเข้าหาคนที่ชอบ, friendzone, ถูกมองข้าม, วิธีสร้าง self-esteem "
-                    "ตอบเป็น JSON array เท่านั้น ไม่มี markdown: "
-                    '[{"label":"TOPIC_EN_MAX_10CHARS","text":"คำถามภาษาไทยไม่เกิน 20 คำ"}] '
-                    "4 items"
-                ),
-            }],
-            max_tokens=400,
-            temperature=1.1,
-        )
-        raw = result.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        items = json.loads(raw.strip())
-        _suggestions_cache = {"items": items, "ts": now}
-        return {"suggestions": items}
-    except Exception as e:
-        logger.warning(f"Suggestions generation failed ({e}), using fallback")
-        return {"suggestions": _FALLBACK_SUGGESTIONS}
+    """Return static starter questions with pre-written answers. No AI call, no token cost."""
+    return {"suggestions": _PREFILLED_STARTERS}
 
 
 @app.get("/usage/{user_id}", response_model=UsageResponse)

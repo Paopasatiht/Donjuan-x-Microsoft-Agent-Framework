@@ -41,6 +41,7 @@ class AdminUserStats(BaseModel):
 class SuggestionItem(BaseModel):
     label: str
     text: str
+    answer: str | None = None
 
 
 class SuggestionsResponse(BaseModel):

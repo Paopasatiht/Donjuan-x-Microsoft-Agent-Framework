@@ -868,6 +868,18 @@ async function fetchSuggestions() {
   } catch(e) {}
 }
 
+function sendPrefilled(question, answer) {
+  if (state.loading) return;
+  if (answer) {
+    state.messages.push({ role: 'user', text: question });
+    state.messages.push({ role: 'agent', text: answer });
+    render();
+    scrollChat();
+  } else {
+    sendMessage(question);
+  }
+}
+
 /* ── Starters ── */
 function renderStarters() {
   if (!state.suggestions) {
@@ -877,7 +889,7 @@ function renderStarters() {
   }
   return `<div class="starters">
     ${state.suggestions.map((s, i) =>
-      `<button class="starter" style="--i:${i}" data-msg="${esc(s.text)}" onclick="sendMessage(this.dataset.msg)">
+      `<button class="starter" style="--i:${i}" data-msg="${esc(s.text)}" data-answer="${esc(s.answer||'')}" onclick="sendPrefilled(this.dataset.msg, this.dataset.answer)">
         <div class="starter-label">${esc(s.label)}</div>
         <div class="starter-text">${esc(s.text)}</div>
       </button>`
