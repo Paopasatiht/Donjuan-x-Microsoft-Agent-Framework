@@ -596,11 +596,14 @@ const API = window.location.pathname.replace(/\/$/, '');
 const DON_LETTERS = ['D','o','n'];
 const JUAN_LETTERS = ['J','u','a','n'];
 
+function newSessionId() { return 'sess_' + Math.random().toString(36).slice(2, 10); }
+
 let state = {
   view: 'landing',
   messages: [],
   loading: false,
   userId: localStorage.getItem('dj_user_id') || ('user_' + Math.random().toString(36).slice(2,8)),
+  sessionId: newSessionId(),  // fresh every page load, not persisted
   quota: { remaining: 20, daily_limit: 20, queries_today: 0 },
   theme: localStorage.getItem('dj_theme') || 'dark',
   suggestions: null,
@@ -636,7 +639,7 @@ async function sendMessage(text) {
     const resp = await fetch(API + '/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: state.userId, message: text }),
+      body: JSON.stringify({ user_id: state.userId, message: text, session_id: state.sessionId }),
     });
 
     const reader = resp.body.getReader();
@@ -935,7 +938,7 @@ function renderChat() {
       <div class="topbar">
         <div class="topbar-title"><span class="t1">&#3604;&#3629;&#3609;&#3630;&#3623;&#3609;</span><span class="t2">COACHING &middot; SESSION</span></div>
         <div class="topbar-actions">
-          <button class="iconbtn" onclick="state.messages=[]; render();" title="New chat">
+          <button class="iconbtn" onclick="state.messages=[]; state.sessionId=newSessionId(); render();" title="New chat">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 5v14M5 12h14"/></svg>
           </button>
           <button class="iconbtn" onclick="setTheme(state.theme==='dark'?'light':'dark')">

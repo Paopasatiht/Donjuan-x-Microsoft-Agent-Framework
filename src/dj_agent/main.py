@@ -32,6 +32,25 @@ logger = logging.getLogger(__name__)
 _agent = None
 _components = None
 
+# In-memory session store: {session_id: (AgentSession, last_used_ts)}
+_active_sessions: dict = {}
+_SESSION_TTL = 1800  # 30 min idle → evict
+
+
+def _get_or_create_session(session_id: str):
+    """Return existing session or create a new one. Updates last-used timestamp."""
+    now = time.time()
+    # Evict stale sessions while we're here
+    stale = [k for k, (_, ts) in _active_sessions.items() if now - ts > _SESSION_TTL]
+    for k in stale:
+        del _active_sessions[k]
+    if session_id not in _active_sessions:
+        _active_sessions[session_id] = (_agent.create_session(session_id=session_id), now)
+    else:
+        sess, _ = _active_sessions[session_id]
+        _active_sessions[session_id] = (sess, now)
+    return _active_sessions[session_id][0]
+
 # Suggestions cache: refreshed every hour
 _suggestions_cache: dict = {"items": [], "ts": 0.0}
 _SUGGESTIONS_TTL = 3600
@@ -110,8 +129,8 @@ async def chat(req: ChatRequest):
     # Increment user counter
     rate_limiter._increment_user(req.user_id)
 
-    # Create session for this user
-    session = _agent.create_session(session_id=req.user_id)
+    # Reuse page session if provided, else fall back to user_id (stateless)
+    session = _get_or_create_session(req.session_id or req.user_id)
 
     # Run agent
     response = await _agent.run(req.message, session=session)
@@ -149,7 +168,7 @@ async def chat_stream(req: ChatRequest):
 
     async def event_gen():
         try:
-            session = _agent.create_session(session_id=req.user_id)
+            session = _get_or_create_session(req.session_id or req.user_id)
             stream = _agent.run(req.message, session=session, stream=True)
             async for update in stream:
                 if update.text:
