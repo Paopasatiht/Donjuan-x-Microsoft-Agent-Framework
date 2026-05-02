@@ -1,15 +1,18 @@
 """FastAPI backend for DJ Agent v2."""
 
+import json
 import logging
 import sys
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from openai import AsyncOpenAI
 
 from .agent import build_dj_agent
 from .config import settings
@@ -18,6 +21,7 @@ from .schemas import (
     AdminUserStats,
     ChatRequest,
     ChatResponse,
+    SuggestionsResponse,
     UsageResponse,
 )
 
@@ -27,13 +31,21 @@ logger = logging.getLogger(__name__)
 # Global state (set in lifespan)
 _agent = None
 _components = None
+_stream_workflow = None
+
+# Suggestions cache: refreshed every hour
+_suggestions_cache: dict = {"items": [], "ts": 0.0}
+_SUGGESTIONS_TTL = 3600
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _agent, _components
+    global _agent, _components, _stream_workflow
     logger.info("Starting DJ Agent v2...")
     _agent, _components = build_dj_agent()
+    # Build a single-agent workflow for streaming support
+    from agent_framework import WorkflowBuilder
+    _stream_workflow = WorkflowBuilder(name="dj_stream", start_executor=_agent).build()
     logger.info("DJ Agent v2 ready!")
     yield
     logger.info("Shutting down DJ Agent v2...")
@@ -109,6 +121,83 @@ async def chat(req: ChatRequest):
         remaining_quota=remaining_after,
         tokens_used=None,
     )
+
+
+@app.post("/chat/stream")
+async def chat_stream(req: ChatRequest):
+    """Stream a response from DJ Agent using Server-Sent Events."""
+    rate_limiter = _components["rate_limiter"]
+
+    remaining = rate_limiter.get_remaining(req.user_id)
+    if remaining <= 0:
+        quota = rate_limiter.get_current_quota()
+        msg = (
+            "ระบบปิดปรับปรุงชั่วคราว เนื่องจาก budget ประจำเดือนหมดแล้ว"
+            if quota == 0
+            else f"วันนี้ครบ {quota} ข้อแล้ว มาใหม่พรุ่งนี้นะ 💪"
+        )
+        async def quota_err():
+            yield f"data: {json.dumps({'text': msg})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'remaining_quota': 0})}\n\n"
+        return StreamingResponse(quota_err(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    rate_limiter._increment_user(req.user_id)
+
+    async def event_gen():
+        from agent_framework import AgentResponseUpdate
+        try:
+            session = _agent.create_session(session_id=req.user_id)
+            async for event in _stream_workflow.run(req.message, session=session, stream=True):
+                if event.type == "output" and isinstance(event.data, AgentResponseUpdate):
+                    yield f"data: {json.dumps({'text': event.data.text})}\n\n"
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            remaining_after = rate_limiter.get_remaining(req.user_id)
+            yield f"data: {json.dumps({'done': True, 'remaining_quota': remaining_after})}\n\n"
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/suggestions", response_model=SuggestionsResponse)
+async def get_suggestions():
+    """Return 4 AI-generated Thai dating questions (cached 1 h)."""
+    global _suggestions_cache
+    now = time.time()
+    if now - _suggestions_cache["ts"] < _SUGGESTIONS_TTL and _suggestions_cache["items"]:
+        return {"suggestions": _suggestions_cache["items"]}
+
+    oai = AsyncOpenAI(api_key=settings.openai_api_key)
+    result = await oai.chat.completions.create(
+        model=settings.openai_model,
+        messages=[{
+            "role": "user",
+            "content": (
+                "สร้าง 4 คำถามภาษาไทยสั้น ๆ ที่คนจะถาม dating coach ชื่อ Don Juan "
+                "หัวข้อ: ความกลัวเข้าหาคนที่ชอบ, friendzone, ถูกมองข้าม, วิธีสร้าง self-esteem "
+                "ตอบเป็น JSON array เท่านั้น ไม่มี markdown: "
+                '[{"label":"TOPIC_EN_MAX_10CHARS","text":"คำถามภาษาไทยไม่เกิน 20 คำ"}] '
+                "4 items"
+            ),
+        }],
+        max_tokens=400,
+        temperature=1.1,
+    )
+    raw = result.choices[0].message.content.strip()
+    # Strip markdown fences if model adds them
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    items = json.loads(raw.strip())
+    _suggestions_cache = {"items": items, "ts": now}
+    return {"suggestions": items}
 
 
 @app.get("/usage/{user_id}", response_model=UsageResponse)

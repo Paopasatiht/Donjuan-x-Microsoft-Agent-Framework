@@ -234,6 +234,24 @@ textarea { resize: none; }
 .typing-dot:nth-child(3) { animation-delay: 0.3s; }
 @keyframes typingBounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
 
+/* Streaming cursor */
+.stream-cursor { animation: cursorBlink .8s step-end infinite; color: var(--accent); font-weight: 400; }
+@keyframes cursorBlink { 50% { opacity: 0; } }
+
+/* Starter skeleton + stagger */
+.starter-skeleton { background: var(--bg-raised); cursor: default; min-height: 96px; }
+.starter-skeleton::after {
+  content: ''; display: block; height: 10px; width: 60%; margin: 8px 0;
+  background: var(--hairline-strong); border-radius: 4px;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer { 0%,100% { opacity: 0.4; } 50% { opacity: 0.8; } }
+.starter[style*="--i"] {
+  opacity: 0;
+  animation: fadeSlideIn 0.35s ease calc(var(--i, 0) * 120ms) forwards;
+}
+@keyframes fadeSlideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
 /* ── Admin Dashboard ───────────────────────────────────── */
 .admin { padding: 40px 48px 60px; max-width: 1240px; margin: 0 auto; }
 .admin h2 { font-family: var(--serif); font-weight: 700; font-size: 36px; line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 6px; }
@@ -562,6 +580,7 @@ let state = {
   userId: localStorage.getItem('dj_user_id') || ('user_' + Math.random().toString(36).slice(2,8)),
   quota: { remaining: 20, daily_limit: 20, queries_today: 0 },
   theme: localStorage.getItem('dj_theme') || 'dark',
+  suggestions: null,
 };
 localStorage.setItem('dj_user_id', state.userId);
 
@@ -584,23 +603,72 @@ async function fetchQuota() {
 
 async function sendMessage(text) {
   state.messages.push({ role: 'user', text });
+  state.messages.push({ role: 'agent', text: '', streaming: true });
   state.loading = true;
   render(); scrollChat();
+
+  const startTs = Date.now();
+
   try {
-    const r = await fetch(API + '/chat', {
+    const resp = await fetch(API + '/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: state.userId, message: text }),
     });
-    const data = await r.json();
-    state.messages.push({ role: 'agent', text: data.response });
-    state.quota.remaining = data.remaining_quota;
-    state.quota.queries_today = state.quota.daily_limit - data.remaining_quota;
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop(); // keep incomplete line
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let data;
+        try { data = JSON.parse(line.slice(6)); } catch { continue; }
+        if (data.text) {
+          state.messages[state.messages.length - 1].text += data.text;
+          updateStreamingMsg();
+          scrollChat();
+        }
+        if (data.done) {
+          // Ensure minimum visible delay of 500ms before finalising
+          const elapsed = Date.now() - startTs;
+          if (elapsed < 500) await new Promise(r => setTimeout(r, 500 - elapsed));
+          state.messages[state.messages.length - 1].streaming = false;
+          state.quota.remaining = data.remaining_quota ?? state.quota.remaining;
+          state.quota.queries_today = state.quota.daily_limit - state.quota.remaining;
+          state.loading = false;
+          render(); scrollChat();
+        }
+        if (data.error) {
+          state.messages[state.messages.length - 1].text = data.error;
+          state.messages[state.messages.length - 1].streaming = false;
+          state.loading = false;
+          render();
+        }
+      }
+    }
   } catch(e) {
-    state.messages.push({ role: 'agent', text: 'API server unavailable' });
+    state.messages[state.messages.length - 1].text = 'API server unavailable';
+    state.messages[state.messages.length - 1].streaming = false;
+    state.loading = false;
+    render();
   }
-  state.loading = false;
-  render(); scrollChat();
+}
+
+function updateStreamingMsg() {
+  const bodies = document.querySelectorAll('.msg-agent .msg-body');
+  if (!bodies.length) return;
+  const last = bodies[bodies.length - 1];
+  const m = state.messages[state.messages.length - 1];
+  if (m && m.streaming) {
+    last.innerHTML = formatResponse(m.text) + '<span class="stream-cursor">▊</span>';
+  }
 }
 
 function scrollChat() {
@@ -696,7 +764,36 @@ function renderLanding() {
 function enterChat() {
   const hero = document.getElementById('landingHero');
   if (hero) { hero.style.opacity = '0'; hero.style.pointerEvents = 'none'; }
+  fetchSuggestions(); // start prefetching immediately, don't await
   setTimeout(() => { state.view = 'chat'; fetchQuota(); render(); }, 500);
+}
+
+async function fetchSuggestions() {
+  try {
+    const r = await fetch(API + '/suggestions');
+    if (r.ok) {
+      const data = await r.json();
+      state.suggestions = data.suggestions;
+      if (state.view === 'chat' && state.messages.length === 0) render();
+    }
+  } catch(e) {}
+}
+
+/* ── Starters ── */
+function renderStarters() {
+  if (!state.suggestions) {
+    return `<div class="starters">
+      ${[0,1,2,3].map(() => '<button class="starter starter-skeleton" disabled></button>').join('\n      ')}
+    </div>`;
+  }
+  return `<div class="starters">
+    ${state.suggestions.map((s, i) =>
+      `<button class="starter" style="--i:${i}" onclick="sendMessage(${JSON.stringify(s.text)})">
+        <div class="starter-label">${esc(s.label)}</div>
+        <div class="starter-text">${esc(s.text)}</div>
+      </button>`
+    ).join('\n    ')}
+  </div>`;
 }
 
 /* ── Chat ── */
@@ -712,12 +809,7 @@ function renderChat() {
       <div class="chat-hero-kicker">COACHING SESSION</div>
       <h1>&#3606;&#3634;&#3617;&#3604;&#3629;&#3609;<em>&#3630;&#3623;&#3609;</em></h1>
       <p>Self-esteem &#3617;&#3634;&#3585;&#3656;&#3629;&#3609;&#3607;&#3640;&#3585;&#3629;&#3618;&#3656;&#3634;&#3591; &#3606;&#3657;&#3634;&#3617;&#3637;&#3648;&#3619;&#3639;&#3656;&#3629;&#3591;&#3652;&#3627;&#3609;&#3588;&#3657;&#3634;&#3591;&#3588;&#3634;&#3651;&#3592; &#3606;&#3634;&#3617;&#3617;&#3634;&#3648;&#3621;&#3618;</p>
-      <div class="starters">
-        <button class="starter" onclick="sendMessage('\u0e1c\u0e21\u0e0a\u0e2d\u0e1a\u0e2a\u0e32\u0e27\u0e04\u0e19\u0e19\u0e36\u0e07\u0e41\u0e15\u0e48\u0e44\u0e21\u0e48\u0e01\u0e25\u0e49\u0e32\u0e40\u0e02\u0e49\u0e32\u0e44\u0e1b\u0e04\u0e38\u0e22')"><div class="starter-label">FEAR</div><div class="starter-text">&#3612;&#3617;&#3594;&#3629;&#3610;&#3626;&#3634;&#3623;&#3588;&#3609;&#3609;&#3638;&#3591;&#3649;&#3605;&#3656;&#3652;&#3617;&#3656;&#3585;&#3621;&#3657;&#3634;&#3648;&#3586;&#3657;&#3634;&#3652;&#3611;&#3588;&#3640;&#3618;</div></button>
-        <button class="starter" onclick="sendMessage('\u0e40\u0e18\u0e2d\u0e1a\u0e2d\u0e01\u0e27\u0e48\u0e32\u0e40\u0e23\u0e32\u0e40\u0e1b\u0e47\u0e19\u0e41\u0e04\u0e48\u0e40\u0e1e\u0e37\u0e48\u0e2d\u0e19\u0e01\u0e31\u0e19')"><div class="starter-label">FRIENDZONE</div><div class="starter-text">&#3648;&#3608;&#3629;&#3610;&#3629;&#3585;&#3623;&#3656;&#3634;&#3648;&#3619;&#3634;&#3648;&#3611;&#3655;&#3609;&#3649;&#3588;&#3656;&#3648;&#3614;&#3639;&#3656;&#3629;&#3609;&#3585;&#3633;&#3609;</div></button>
-        <button class="starter" onclick="sendMessage('\u0e1c\u0e21\u0e14\u0e35\u0e01\u0e31\u0e1a\u0e40\u0e18\u0e2d\u0e21\u0e32\u0e01\u0e41\u0e15\u0e48\u0e40\u0e18\u0e2d\u0e44\u0e21\u0e48\u0e2a\u0e19\u0e43\u0e08')"><div class="starter-label">NICE GUY</div><div class="starter-text">&#3612;&#3617;&#3604;&#3637;&#3585;&#3633;&#3610;&#3648;&#3608;&#3629;&#3617;&#3634;&#3585;&#3649;&#3605;&#3656;&#3648;&#3608;&#3629;&#3652;&#3617;&#3656;&#3626;&#3609;&#3651;&#3592;</div></button>
-        <button class="starter" onclick="sendMessage('\u0e27\u0e34\u0e18\u0e35\u0e2a\u0e23\u0e49\u0e32\u0e07 self-esteem \u0e17\u0e33\u0e22\u0e31\u0e07\u0e44\u0e07')"><div class="starter-label">SELF-ESTEEM</div><div class="starter-text">&#3623;&#3636;&#3608;&#3637;&#3626;&#3619;&#3657;&#3634;&#3591; self-esteem &#3607;&#3635;&#3618;&#3633;&#3591;&#3652;&#3591;</div></button>
-      </div>
+      ${renderStarters()}
     </div>` : '';
 
   const typing = state.loading ? '<div class="msg msg-agent"><div class="msg-gutter">DJ</div><div class="msg-body"><div class="typing"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div></div>' : '';

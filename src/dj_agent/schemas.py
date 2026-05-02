@@ -35,3 +35,12 @@ class AdminUserStats(BaseModel):
     queries_today: int
     total_queries: int
     total_cost_usd: float
+
+
+class SuggestionItem(BaseModel):
+    label: str
+    text: str
+
+
+class SuggestionsResponse(BaseModel):
+    suggestions: list[SuggestionItem]
