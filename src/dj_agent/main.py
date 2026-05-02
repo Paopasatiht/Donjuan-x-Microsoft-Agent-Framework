@@ -126,18 +126,21 @@ async def chat(req: ChatRequest):
             remaining_quota=0,
         )
 
-    # Increment user counter
     rate_limiter._increment_user(req.user_id)
-
-    # Reuse page session if provided, else fall back to user_id (stateless)
     session = _get_or_create_session(req.session_id or req.user_id)
 
-    # Run agent
+    start_ts = time.time()
     response = await _agent.run(req.message, session=session)
+    latency = time.time() - start_ts
 
-    # Get updated remaining after this request
+    _components["query_logger"].log(
+        user_id=req.user_id,
+        query=req.message,
+        session_id=req.session_id,
+        latency_s=latency,
+    )
+
     remaining_after = rate_limiter.get_remaining(req.user_id)
-
     return ChatResponse(
         response=response.text or "",
         remaining_quota=remaining_after,
@@ -167,6 +170,7 @@ async def chat_stream(req: ChatRequest):
     rate_limiter._increment_user(req.user_id)
 
     async def event_gen():
+        start_ts = time.time()
         try:
             session = _get_or_create_session(req.session_id or req.user_id)
             stream = _agent.run(req.message, session=session, stream=True)
@@ -177,6 +181,13 @@ async def chat_stream(req: ChatRequest):
             logger.error(f"Stream error: {e}")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         finally:
+            latency = time.time() - start_ts
+            _components["query_logger"].log(
+                user_id=req.user_id,
+                query=req.message,
+                session_id=req.session_id,
+                latency_s=latency,
+            )
             remaining_after = rate_limiter.get_remaining(req.user_id)
             yield f"data: {json.dumps({'done': True, 'remaining_quota': remaining_after})}\n\n"
 
@@ -297,6 +308,41 @@ async def admin_spend_history():
             days.append({"date": day_str, "cost_usd": round(microcents / 100_000, 4)})
 
     return {"spend_history": days}
+
+
+@app.get("/admin/queries", dependencies=[Depends(verify_admin)])
+async def admin_queries(limit: int = 100, offset: int = 0):
+    """Get paginated query log (newest first)."""
+    ql = _components["query_logger"]
+    return {
+        "total": ql.total(),
+        "offset": offset,
+        "limit": limit,
+        "entries": ql.get_entries(limit=min(limit, 500), offset=offset),
+    }
+
+
+@app.get("/admin/queries/export", dependencies=[Depends(verify_admin)])
+async def admin_queries_export():
+    """Download full query log as CSV."""
+    from fastapi.responses import StreamingResponse as SR
+    import io, csv
+
+    ql = _components["query_logger"]
+    entries = ql.get_entries(limit=2000, offset=0)
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=["ts", "user_id", "session_id", "query", "latency_s"])
+    writer.writeheader()
+    writer.writerows(entries)
+    buf.seek(0)
+
+    now_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return SR(
+        iter([buf.getvalue().encode("utf-8-sig")]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=dj_queries_{now_str}.csv"},
+    )
 
 
 # ---------------------------------------------------------------------------

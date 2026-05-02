@@ -9,7 +9,7 @@ from .config import settings
 from .knowledge import DJ_SYSTEM_PROMPT
 from .middleware.cost_tracker import CostTrackerMiddleware
 from .middleware.guardrails import GuardrailsMiddleware
-from .middleware.query_logger import query_logger_middleware
+from .middleware.query_logger import RedisQueryLogger, query_logger_middleware
 from .middleware.rate_limiter import RateLimiterMiddleware
 from .tools import init_knowledge_store, retrieve_dj_knowledge
 
@@ -118,10 +118,13 @@ def build_dj_agent() -> tuple[Agent, dict]:
         ],
     )
 
+    query_logger = RedisQueryLogger(redis_client)
+
     components = {
         "redis": redis_client,
         "cost_tracker": cost_tracker,
         "rate_limiter": rate_limiter,
+        "query_logger": query_logger,
     }
 
     logger.info(f"DJ Agent built — model={settings.openai_model}, quota={settings.daily_quota_per_user}/day, budget=${settings.monthly_budget_usd}/month")

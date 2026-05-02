@@ -237,6 +237,23 @@ input { font-family: inherit; color: inherit; background: none; border: none; ou
 .spark-bar.hi { background: var(--accent); }
 .spark-val { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); text-align: right; font-variant-numeric: tabular-nums; }
 
+/* Query log */
+.qlog-query { max-width: 480px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qlog-query:hover { white-space: normal; overflow: visible; }
+.dl-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 16px; border: 1.5px solid var(--accent); color: var(--accent);
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em;
+  text-transform: uppercase; border-radius: 2px; transition: all .15s;
+}
+.dl-btn:hover { background: var(--accent); color: var(--accent-ink); }
+.load-more {
+  width: 100%; padding: 12px; border-top: 1px solid var(--hairline);
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--fg-quiet); transition: color .12s;
+}
+.load-more:hover { color: var(--fg); }
+
 @media (max-width: 720px) {
   .admin { padding: 24px 16px; }
   .kpi-row { grid-template-columns: 1fr 1fr; }
@@ -254,6 +271,9 @@ let authed = false;
 let stats = null;
 let users = null;
 let spendHistory = null;
+let queries = null;
+let queriesOffset = 0;
+const QUERIES_PAGE = 50;
 let err = '';
 let theme = localStorage.getItem('dj_theme') || 'dark';
 document.documentElement.dataset.theme = theme;
@@ -281,13 +301,49 @@ async function doLogin() {
 
 async function refreshData() {
   try {
-    const [ur, sr] = await Promise.all([
+    const [ur, sr, qr] = await Promise.all([
       fetch(API + '/admin/users', { headers: { 'X-Admin-Key': adminKey } }),
       fetch(API + '/admin/spend-history', { headers: { 'X-Admin-Key': adminKey } }),
+      fetch(API + `/admin/queries?limit=${QUERIES_PAGE}&offset=0`, { headers: { 'X-Admin-Key': adminKey } }),
     ]);
     if (ur.ok) users = await ur.json();
     if (sr.ok) spendHistory = await sr.json();
+    if (qr.ok) { queries = await qr.json(); queriesOffset = QUERIES_PAGE; }
   } catch(e) {}
+}
+
+async function loadMoreQueries() {
+  try {
+    const r = await fetch(API + `/admin/queries?limit=${QUERIES_PAGE}&offset=${queriesOffset}`, { headers: { 'X-Admin-Key': adminKey } });
+    if (r.ok) {
+      const data = await r.json();
+      queries.entries = [...(queries.entries || []), ...data.entries];
+      queries.total = data.total;
+      queriesOffset += data.entries.length;
+      render();
+    }
+  } catch(e) {}
+}
+
+function downloadCSV() {
+  window.location.href = API + '/admin/queries/export?key=' + encodeURIComponent(adminKey);
+  // Use header auth via a hidden form trick
+  const form = document.createElement('form');
+  form.method = 'GET';
+  form.action = API + '/admin/queries/export';
+  document.body.appendChild(form);
+  // Can't set headers in form — use fetch blob instead
+  fetch(API + '/admin/queries/export', { headers: { 'X-Admin-Key': adminKey } })
+    .then(r => r.blob())
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'dj_queries.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  document.body.removeChild(form);
 }
 
 async function refresh() {
@@ -441,6 +497,41 @@ function renderDashboard() {
           </table>` : '<div style="color:var(--fg-quiet);font-size:14px;padding:20px 0;text-align:center">&#3618;&#3633;&#3591;&#3652;&#3617;&#3656;&#3617;&#3637;&#3612;&#3641;&#3657;&#3651;&#3594;&#3657;&#3623;&#3633;&#3609;&#3609;&#3637;&#3657;</div>'}
         </div>
       </div>
+
+      <!-- Query Log -->
+      ${(() => {
+        const qList = queries?.entries || [];
+        const qTotal = queries?.total || 0;
+        const hasMore = qList.length < qTotal;
+        return `<div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Query log</div>
+            <div class="panel-meta" style="display:flex;align-items:center;gap:12px">
+              <span>${qTotal} TOTAL</span>
+              <button class="dl-btn" onclick="downloadCSV()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                DOWNLOAD CSV
+              </button>
+            </div>
+          </div>
+          ${qList.length ? `
+          <table class="table">
+            <thead><tr><th>Time</th><th>User</th><th>Query</th><th>Latency</th></tr></thead>
+            <tbody>${qList.map(q => {
+              const dt = new Date(q.ts);
+              const timeStr = dt.toLocaleDateString('th-TH') + ' ' + dt.toLocaleTimeString('th-TH', {hour:'2-digit',minute:'2-digit'});
+              return `<tr>
+                <td class="mono" style="white-space:nowrap;font-size:11px">${esc(timeStr)}</td>
+                <td class="mono" style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(q.user_id)}</td>
+                <td class="qlog-query">${esc(q.query)}</td>
+                <td class="num mono" style="font-size:11px">${q.latency_s}s</td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>
+          ${hasMore ? `<button class="load-more" onclick="loadMoreQueries()">LOAD MORE (${qTotal - qList.length} remaining)</button>` : ''}
+          ` : '<div style="color:var(--fg-quiet);font-size:14px;padding:24px;text-align:center">ยังไม่มี query log</div>'}
+        </div>`;
+      })()}
 
     </div>
   </div>`;
