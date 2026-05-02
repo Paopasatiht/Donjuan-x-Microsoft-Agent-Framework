@@ -238,6 +238,29 @@ textarea { resize: none; }
 .stream-cursor { animation: cursorBlink .8s step-end infinite; color: var(--accent); font-weight: 400; }
 @keyframes cursorBlink { 50% { opacity: 0; } }
 
+/* ── Response markdown styles ──────────────────────────── */
+.resp-h {
+  font-family: var(--serif); font-weight: 700; font-size: 17px;
+  color: var(--accent); margin: 20px 0 8px; line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+.resp-h:first-child { margin-top: 4px; }
+.resp-sh {
+  font-family: var(--serif); font-weight: 600; font-size: 15px;
+  color: var(--fg); margin: 14px 0 6px; line-height: 1.3;
+}
+.resp-p { margin: 0 0 10px; text-wrap: pretty; line-height: 1.8; }
+.resp-p:last-child { margin-bottom: 0; }
+.resp-list { margin: 4px 0 12px 4px; display: flex; flex-direction: column; gap: 5px; padding: 0; list-style: none; }
+.resp-list li { line-height: 1.75; padding-left: 16px; position: relative; }
+.resp-list li::before { content: '—'; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
+.resp-num { margin: 4px 0 12px; display: flex; flex-direction: column; gap: 6px; padding: 0; list-style: none; }
+.resp-num li { display: flex; gap: 10px; line-height: 1.75; }
+.resp-num li .resp-num-n { font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: 700; min-width: 18px; padding-top: 3px; }
+.resp-code { font-family: var(--mono); font-size: 0.86em; background: var(--bg-inset); padding: 1px 6px; border-radius: 3px; color: var(--accent); }
+[data-theme="light"] .resp-h { color: var(--accent); }
+[data-theme="light"] .resp-list li::before { color: var(--accent); }
+
 /* Starter skeleton + stagger */
 .starter-skeleton { background: var(--bg-raised); cursor: default; min-height: 96px; }
 .starter-skeleton::after {
@@ -678,11 +701,74 @@ function scrollChat() {
   }, 60);
 }
 
-function formatResponse(text) {
-  return text
+function inlineFmt(t) {
+  return t
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/\n/g, '<br>');
+    .replace(/`([^`]+)`/g, '<code class="resp-code">$1</code>');
+}
+
+function formatResponse(text) {
+  if (!text) return '';
+  const lines = text.split('\n');
+  const out = [];
+  let listBuf = [];   // bullet list buffer
+  let numBuf = [];    // numbered list buffer
+
+  function flushList() {
+    if (listBuf.length) {
+      out.push('<ul class="resp-list">' + listBuf.map(l => `<li>${l}</li>`).join('') + '</ul>');
+      listBuf = [];
+    }
+    if (numBuf.length) {
+      out.push('<ol class="resp-num">' + numBuf.map(([n,l]) =>
+        `<li><span class="resp-num-n">${n}.</span><span>${l}</span></li>`).join('') + '</ol>');
+      numBuf = [];
+    }
+  }
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+
+    // ### sub-heading
+    if (/^###\s/.test(line)) {
+      flushList();
+      out.push(`<h4 class="resp-sh">${inlineFmt(line.slice(4))}</h4>`);
+    }
+    // ## heading  →  accent colour
+    else if (/^##\s/.test(line)) {
+      flushList();
+      out.push(`<h3 class="resp-h">${inlineFmt(line.slice(3))}</h3>`);
+    }
+    // # heading
+    else if (/^#\s/.test(line)) {
+      flushList();
+      out.push(`<h3 class="resp-h">${inlineFmt(line.slice(2))}</h3>`);
+    }
+    // numbered list  1. / 2. …
+    else if (/^\d+\.\s/.test(line)) {
+      if (listBuf.length) flushList();
+      const m = line.match(/^(\d+)\.\s(.*)/);
+      numBuf.push([m[1], inlineFmt(m[2])]);
+    }
+    // bullet list  - / * / •
+    else if (/^[-*•]\s/.test(line)) {
+      if (numBuf.length) flushList();
+      listBuf.push(inlineFmt(line.slice(2)));
+    }
+    // empty line
+    else if (line.trim() === '') {
+      flushList();
+      out.push('<br>');
+    }
+    // normal paragraph
+    else {
+      flushList();
+      out.push(`<p class="resp-p">${inlineFmt(line)}</p>`);
+    }
+  }
+  flushList();
+  return out.join('');
 }
 
 function submitChat() {
@@ -788,7 +874,7 @@ function renderStarters() {
   }
   return `<div class="starters">
     ${state.suggestions.map((s, i) =>
-      `<button class="starter" style="--i:${i}" onclick="sendMessage(${JSON.stringify(s.text)})">
+      `<button class="starter" style="--i:${i}" data-msg="${esc(s.text)}" onclick="sendMessage(this.dataset.msg)">
         <div class="starter-label">${esc(s.label)}</div>
         <div class="starter-text">${esc(s.text)}</div>
       </button>`
